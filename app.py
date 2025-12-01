@@ -325,8 +325,13 @@ elif page == "Home & IPO Search":
     with col1:
         search_option = st.selectbox(
             "Search by:",
-            ["Ticker", "Company Name", "Browse Random IPOs"]
+            ["Ticker", "Company Name", "Browse All IPOs", "Browse Random IPOs"]
         )
+
+    # Filter options
+    with col2:
+        if search_option in ["Browse All IPOs", "Browse Random IPOs"]:
+            st.markdown("#### Filters")
 
     if search_option == "Ticker":
         ticker = st.selectbox("Select Ticker:", sorted(test_preds['ticker'].unique()))
@@ -336,10 +341,122 @@ elif page == "Home & IPO Search":
         company = st.selectbox("Select Company:", sorted(test_preds['company_name'].unique()))
         selected_ipo = test_preds[test_preds['company_name'] == company].iloc[0]
 
-    else:
-        sample_size = st.slider("Number of random IPOs to display:", 5, 20, 10)
-        st.markdown("### Random Sample of IPOs")
-        sample_ipos = test_preds.sample(n=sample_size)
+    elif search_option == "Browse All IPOs":
+        # Filter options
+        col_filter1, col_filter2, col_filter3 = st.columns(3)
+
+        with col_filter1:
+            industry_filter = st.multiselect(
+                "Filter by Industry:",
+                options=['All'] + sorted(test_preds['industry'].unique().tolist()),
+                default=['All']
+            )
+
+        with col_filter2:
+            prediction_filter = st.selectbox(
+                "Prediction Accuracy:",
+                options=['All', 'Correct Predictions', 'Incorrect Predictions']
+            )
+
+        with col_filter3:
+            risk_filter = st.selectbox(
+                "Risk Level:",
+                options=['All', 'High Risk', 'Low Risk']
+            )
+
+        # Apply filters
+        filtered_data = test_preds.copy()
+
+        # Industry filter
+        if 'All' not in industry_filter and len(industry_filter) > 0:
+            filtered_data = filtered_data[filtered_data['industry'].isin(industry_filter)]
+
+        # Prediction accuracy filter
+        if prediction_filter == 'Correct Predictions':
+            filtered_data = filtered_data[
+                (filtered_data['predicted_high_risk'] == filtered_data['high_risk_ipo'])
+            ]
+        elif prediction_filter == 'Incorrect Predictions':
+            filtered_data = filtered_data[
+                (filtered_data['predicted_high_risk'] != filtered_data['high_risk_ipo'])
+            ]
+
+        # Risk filter
+        if risk_filter == 'High Risk':
+            filtered_data = filtered_data[filtered_data['predicted_high_risk'] == 1]
+        elif risk_filter == 'Low Risk':
+            filtered_data = filtered_data[filtered_data['predicted_high_risk'] == 0]
+
+        st.markdown(f"### All IPOs ({len(filtered_data)} results)")
+
+        display_cols = ['ticker', 'company_name', 'industry', 'first_day_return',
+                       'predicted_return', 'predicted_high_risk']
+        display_df = filtered_data[display_cols].copy()
+        display_df['first_day_return'] = display_df['first_day_return'].apply(lambda x: f"{x*100:.2f}%")
+        display_df['predicted_return'] = display_df['predicted_return'].apply(lambda x: f"{x*100:.2f}%")
+        display_df['predicted_high_risk'] = display_df['predicted_high_risk'].map({0: 'Low Risk', 1: 'High Risk'})
+        display_df = display_df.rename(columns={
+            'ticker': 'Ticker',
+            'company_name': 'Company',
+            'industry': 'Industry',
+            'first_day_return': 'Actual Return',
+            'predicted_return': 'Predicted Return',
+            'predicted_high_risk': 'Risk Level'
+        })
+
+        st.dataframe(display_df, use_container_width=True, height=400)
+
+        if len(filtered_data) > 0:
+            selected_ticker = st.selectbox("Select an IPO for detailed analysis:", filtered_data['ticker'].values)
+            selected_ipo = test_preds[test_preds['ticker'] == selected_ticker].iloc[0]
+        else:
+            st.warning("No IPOs match your filter criteria. Please adjust filters.")
+            selected_ipo = None
+
+    else:  # Browse Random IPOs
+        # Filter options
+        col_filter1, col_filter2, col_filter3 = st.columns(3)
+
+        with col_filter1:
+            industry_filter = st.multiselect(
+                "Filter by Industry:",
+                options=['All'] + sorted(test_preds['industry'].unique().tolist()),
+                default=['All']
+            )
+
+        with col_filter2:
+            prediction_filter = st.selectbox(
+                "Prediction Accuracy:",
+                options=['All', 'Correct Predictions', 'Incorrect Predictions']
+            )
+
+        with col_filter3:
+            sample_size = st.slider("Number of IPOs:", 5, 50, 10)
+
+        # Apply filters
+        filtered_data = test_preds.copy()
+
+        # Industry filter
+        if 'All' not in industry_filter and len(industry_filter) > 0:
+            filtered_data = filtered_data[filtered_data['industry'].isin(industry_filter)]
+
+        # Prediction accuracy filter
+        if prediction_filter == 'Correct Predictions':
+            filtered_data = filtered_data[
+                (filtered_data['predicted_high_risk'] == filtered_data['high_risk_ipo'])
+            ]
+        elif prediction_filter == 'Incorrect Predictions':
+            filtered_data = filtered_data[
+                (filtered_data['predicted_high_risk'] != filtered_data['high_risk_ipo'])
+            ]
+
+        if len(filtered_data) >= sample_size:
+            sample_ipos = filtered_data.sample(n=sample_size)
+        else:
+            sample_ipos = filtered_data
+            st.warning(f"Only {len(filtered_data)} IPOs match your criteria.")
+
+        st.markdown(f"### Random Sample of IPOs ({len(sample_ipos)} shown)")
 
         display_cols = ['ticker', 'company_name', 'industry', 'first_day_return',
                        'predicted_return', 'predicted_high_risk']
@@ -347,14 +464,25 @@ elif page == "Home & IPO Search":
         display_df['first_day_return'] = display_df['first_day_return'].apply(lambda x: f"{x*100:.2f}%")
         display_df['predicted_return'] = display_df['predicted_return'].apply(lambda x: f"{x*100:.2f}%")
         display_df['predicted_high_risk'] = display_df['predicted_high_risk'].map({0: 'Low Risk', 1: 'High Risk'})
+        display_df = display_df.rename(columns={
+            'ticker': 'Ticker',
+            'company_name': 'Company',
+            'industry': 'Industry',
+            'first_day_return': 'Actual Return',
+            'predicted_return': 'Predicted Return',
+            'predicted_high_risk': 'Risk Level'
+        })
 
         st.dataframe(display_df, use_container_width=True, height=400)
 
-        selected_ticker = st.selectbox("Select an IPO for detailed analysis:", sample_ipos['ticker'].values)
-        selected_ipo = test_preds[test_preds['ticker'] == selected_ticker].iloc[0]
+        if len(sample_ipos) > 0:
+            selected_ticker = st.selectbox("Select an IPO for detailed analysis:", sample_ipos['ticker'].values)
+            selected_ipo = test_preds[test_preds['ticker'] == selected_ticker].iloc[0]
+        else:
+            selected_ipo = None
 
     # Display selected IPO details
-    if search_option != "Browse Random IPOs" or 'selected_ipo' in locals():
+    if selected_ipo is not None and (search_option not in ["Browse All IPOs", "Browse Random IPOs"] or 'selected_ipo' in locals()):
         st.markdown("---")
         st.markdown("## IPO Details")
 
@@ -803,13 +931,106 @@ elif page == "Feature Analysis":
 
     with col1:
         st.markdown("### Top 3 Most Predictive Features")
+
+        # Helper function to explain features in plain English
+        def explain_feature(feature_name, importance_value, rank):
+            explanations = {
+                'vix_level': {
+                    'name': 'Market Volatility (VIX)',
+                    'description': 'Measures overall stock market fear and uncertainty. Higher VIX means investors are nervous, which typically leads to lower IPO returns as people are more cautious about new investments.'
+                },
+                'sp500_1m_return': {
+                    'name': 'Recent Market Performance',
+                    'description': 'How well the overall stock market performed in the past month. When the market is on an upswing, IPOs tend to perform better as investor optimism is higher.'
+                },
+                'sp500_3m_return': {
+                    'name': 'Market Momentum (3 months)',
+                    'description': 'The stock market trend over the past quarter. Strong positive momentum often carries over to IPO performance as investors have more confidence.'
+                },
+                'vc_backed': {
+                    'name': 'Venture Capital Backing',
+                    'description': 'Whether professional investors funded the company before going public. VC-backed companies often have higher first-day returns due to better quality vetting and investor demand.'
+                },
+                'firm_age': {
+                    'name': 'Company Age',
+                    'description': 'How long the company has been in business. Younger companies tend to be riskier but can have higher returns, while older firms are more stable but may have lower initial pops.'
+                },
+                'underwriter_rank': {
+                    'name': 'Investment Bank Quality',
+                    'description': 'The reputation of the bank managing the IPO. Top-tier banks (like Goldman Sachs) typically handle higher-quality deals, leading to better performance.'
+                },
+                'offer_price': {
+                    'name': 'IPO Offer Price',
+                    'description': 'The initial price per share. Higher-priced IPOs may signal quality but can also limit first-day gains if already richly valued.'
+                },
+                'price_range_deviation': {
+                    'name': 'Pricing vs. Expectations',
+                    'description': 'How the final price compares to initial estimates. Pricing above the range signals strong demand and usually predicts higher first-day returns.'
+                },
+                'gross_proceeds': {
+                    'name': 'Deal Size',
+                    'description': 'Total amount of money raised. Larger deals get more attention but may have less room to move on day one due to size.'
+                },
+                'log_proceeds': {
+                    'name': 'Deal Size (scaled)',
+                    'description': 'A mathematical transformation of deal size that helps the model handle both small and large IPOs fairly.'
+                },
+                'is_tech': {
+                    'name': 'Technology Company',
+                    'description': 'Whether the company is in the technology sector. Tech IPOs historically show higher first-day returns due to growth expectations and investor enthusiasm.'
+                },
+                'treasury_10y': {
+                    'name': 'Interest Rate Environment',
+                    'description': 'The 10-year Treasury bond rate. Lower rates make stocks more attractive relative to bonds, potentially boosting IPO performance.'
+                },
+                'market_volatility': {
+                    'name': 'Market Uncertainty',
+                    'description': 'General market instability. High volatility periods make IPOs riskier as future cash flows are harder to predict.'
+                },
+                'log_assets': {
+                    'name': 'Company Size',
+                    'description': 'Total assets of the company (scaled). Larger companies may be more stable but have less growth potential.'
+                },
+                'is_profitable': {
+                    'name': 'Profitability Status',
+                    'description': 'Whether the company makes money. Profitable companies are seen as less risky, though growth companies may have higher returns despite losses.'
+                },
+                'positive_momentum': {
+                    'name': 'Positive Market Trend',
+                    'description': 'Whether the market was rising when the IPO launched. Rising markets create a better environment for IPO success.'
+                },
+                'high_vix': {
+                    'name': 'High Uncertainty Period',
+                    'description': 'When market volatility is elevated above normal levels. IPOs during these times face more skepticism from investors.'
+                },
+                'tech_x_vc': {
+                    'name': 'VC-Backed Tech Company',
+                    'description': 'The combination of being both a technology company and VC-backed. This "double boost" often leads to the highest first-day returns.'
+                }
+            }
+
+            # Get explanation or create generic one
+            if feature_name in explanations:
+                info = explanations[feature_name]
+            else:
+                # Generic explanation for unknown features
+                info = {
+                    'name': feature_name.replace('_', ' ').title(),
+                    'description': f'A factor that influences IPO performance based on company and market characteristics.'
+                }
+
+            return f"""
+            **{rank}. {info['name']}**
+            
+            {info['description']}
+            
+            *Importance Score: {importance_value:.6f}*
+            """
+
         for idx in range(min(3, len(feature_importance))):
             feature = feature_importance.iloc[idx]
-            st.info(f"""
-            **{idx+1}. {feature['Feature']}**
-            
-            SHAP Importance: {feature['Importance']:.6f}
-            """)
+            explanation = explain_feature(feature['Feature'], feature['Importance'], idx + 1)
+            st.info(explanation)
 
     with col2:
         st.markdown("### Feature Categories")
