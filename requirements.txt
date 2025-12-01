@@ -1,9 +1,10 @@
 streamlit
-shap
-scikit-learn
 pandas
 numpy
-matplotlib
+scikit-learn
 xgboost
 lightgbm
 catboost
+shap
+seaborn
+matplotlib
