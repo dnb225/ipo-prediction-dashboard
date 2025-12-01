@@ -2,17 +2,37 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
-import matplotlib.pyplot as plt
 import shap
+import matplotlib.pyplot as plt
+import seaborn as sns
 import os
 
 # =====================================================================================
-# Load Models, Data, Metadata
+# Page Configuration and Theme
+# =====================================================================================
+
+st.set_page_config(
+    page_title="IPO Prediction and Analysis Suite",
+    layout="wide",
+)
+
+sns.set_style("whitegrid")
+
+st.markdown("""
+<style>
+    .main { background-color: #FAFAFA; }
+    .sidebar .sidebar-content { background-color: #f0f4ff; }
+    h1, h2, h3 { color: #003366; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# =====================================================================================
+# Load All Artifacts
 # =====================================================================================
 
 @st.cache_resource
 def load_artifacts():
-    # Load models
     with open("models/best_classifier.pkl", "rb") as f:
         best_clf = pickle.load(f)
     with open("models/best_regressor.pkl", "rb") as f:
@@ -21,17 +41,15 @@ def load_artifacts():
         scaler = pickle.load(f)
     with open("models/feature_columns.pkl", "rb") as f:
         feature_cols = pickle.load(f)
-
-    # Load metadata
     with open("models/metadata.pkl", "rb") as f:
         metadata = pickle.load(f)
 
-    # Load data outputs
-    test_predictions = pd.read_csv("data/test_predictions.csv")
-    clf_results = pd.read_csv("data/classification_results.csv")
-    reg_results = pd.read_csv("data/regression_results.csv")
+    # Load analytics
+    preds = pd.read_csv("data/test_predictions.csv")
+    clf_metrics = pd.read_csv("data/classification_results.csv")
+    reg_metrics = pd.read_csv("data/regression_results.csv")
     strategy_summary = pd.read_csv("data/strategy_summary.csv")
-    importance_df = pd.read_csv("data/feature_importance.csv")
+    importance = pd.read_csv("data/feature_importance.csv")
 
     return {
         "clf": best_clf,
@@ -39,58 +57,45 @@ def load_artifacts():
         "scaler": scaler,
         "features": feature_cols,
         "metadata": metadata,
-        "preds": test_predictions,
-        "clf_results": clf_results,
-        "reg_results": reg_results,
+        "preds": preds,
+        "clf_metrics": clf_metrics,
+        "reg_metrics": reg_metrics,
         "strategy": strategy_summary,
-        "importance": importance_df
+        "importance": importance
     }
 
-artifacts = load_artifacts()
 
-clf_model = artifacts["clf"]
-reg_model = artifacts["reg"]
-scaler = artifacts["scaler"]
-feature_cols = artifacts["features"]
-metadata = artifacts["metadata"]
-test_predictions = artifacts["preds"]
-clf_results = artifacts["clf_results"]
-reg_results = artifacts["reg_results"]
-strategy_summary = artifacts["strategy"]
-importance_df = artifacts["importance"]
+art = load_artifacts()
 
-
-# =====================================================================================
-# Streamlit Setup
-# =====================================================================================
-
-st.set_page_config(
-    page_title="IPO Risk & First-Day Return Prediction",
-    layout="wide",
-)
-
-st.title("IPO Risk & First-Day Performance Dashboard")
-st.write("Built by JLD Inc. LLC. Partners – FIN 377 Final Project")
+clf = art["clf"]
+reg = art["reg"]
+scaler = art["scaler"]
+feature_cols = art["features"]
+metadata = art["metadata"]
+preds = art["preds"]
+clf_metrics = art["clf_metrics"]
+reg_metrics = art["reg_metrics"]
+strategy = art["strategy"]
+importance = art["importance"]
 
 
 # =====================================================================================
-# Utility: Format Prediction Output
+# Helper Functions
 # =====================================================================================
-
-def predict_from_input(input_df):
-    scaled = scaler.transform(input_df[feature_cols])
-    risk_prob = clf_model.predict_proba(scaled)[:, 1][0]
-    predicted_return = reg_model.predict(scaled)[0]
-    return risk_prob, predicted_return
-
 
 def risk_category(prob):
     if prob >= 0.50:
-        return "High Risk (↓ Expected Negative Return)"
+        return ("High Risk", "red")
     elif prob >= 0.30:
-        return "Moderate Risk"
-    else:
-        return "Low Risk"
+        return ("Moderate Risk", "orange")
+    return ("Low Risk", "green")
+
+
+def predict(df):
+    scaled = scaler.transform(df[feature_cols])
+    p_risk = clf.predict_proba(scaled)[0, 1]
+    p_ret = reg.predict(scaled)[0]
+    return p_risk, p_ret
 
 
 # =====================================================================================
@@ -98,141 +103,184 @@ def risk_category(prob):
 # =====================================================================================
 
 page = st.sidebar.radio(
-    "Navigation",
+    "Navigate",
     [
         "IPO Search",
-        "Visual Analytics",
+        "Mock IPO Builder",
+        "Scenario Stress Testing",
+        "Feature Importance",
         "Model Performance",
-        "Investment Strategies"
+        "Strategy Evaluation"
     ]
 )
 
 
 # =====================================================================================
-# PAGE 1 — IPO Search Tool
+# 1. IPO Search Page
 # =====================================================================================
 
 if page == "IPO Search":
 
-    st.header("IPO Search Tool")
+    st.title("IPO Prediction Search Tool")
 
-    st.write("Search an IPO included in the model's test set.")
+    tickers = sorted(preds["ticker"].unique())
+    t = st.selectbox("Select an IPO", tickers)
 
-    ticker_list = sorted(test_predictions["ticker"].unique())
-    selected = st.selectbox("Select an IPO Ticker", ticker_list)
+    row = preds[preds["ticker"] == t].iloc[0]
 
-    row = test_predictions[test_predictions["ticker"] == selected].iloc[0]
+    st.subheader(f"{row['company_name']} ({row['ticker']})")
 
-    st.subheader(f"Company: {row['company_name']} ({row['ticker']})")
+    with st.container():
+        col1, col2, col3 = st.columns(3)
 
-    st.write("### Model Outputs")
+        col1.metric("Predicted First-Day Return", f"{row['predicted_return']*100:.2f}%")
+        col2.metric("Risk Probability", f"{row['predicted_risk_prob']:.2%}")
+        category, col = risk_category(row['predicted_risk_prob'])
+        col3.markdown(f"<h3 style='color:{col}'>{category}</h3>", unsafe_allow_html=True)
 
-    risk = row["predicted_risk_prob"]
-    pred_return = row["predicted_return"]
-    risk_flag = row["predicted_high_risk"]
-
-    st.metric("Predicted First-Day Return", f"{pred_return*100:.2f}%")
-    st.metric("Risk Probability", f"{risk:.2%}")
-    st.metric("Risk Classification", risk_category(risk))
-
-    with st.expander("Show Full Input Features"):
+    with st.expander("Full Feature Input"):
         st.dataframe(row[feature_cols])
 
 
+# =====================================================================================
+# 2. Mock IPO Builder
+# =====================================================================================
+
+elif page == "Mock IPO Builder":
+    st.title("Mock IPO Builder and Simulator")
+
+    st.write("Create your own hypothetical IPO and evaluate predicted risk and return.")
+
+    inputs = {}
+
+    with st.container():
+        col1, col2 = st.columns(2)
+
+        for i, colname in enumerate(feature_cols):
+            if "price" in colname.lower():
+                inputs[colname] = col1.slider(colname, 0.0, 200.0, 50.0)
+            elif "shares" in colname.lower() or "proceeds" in colname.lower():
+                inputs[colname] = col1.slider(colname, 0, 500_000_000, 50_000_000)
+            elif "age" in colname.lower():
+                inputs[colname] = col2.slider(colname, 0, 100, 10)
+            elif "vix" in colname.lower():
+                inputs[colname] = col2.slider(colname, 5.0, 60.0, 20.0)
+            else:
+                inputs[colname] = col2.slider(colname, -5.0, 5.0, 0.0)
+
+    df = pd.DataFrame([inputs])
+
+    p_risk, p_ret = predict(df)
+    category, col = risk_category(p_risk)
+
+    st.subheader("Simulation Results")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Predicted First-Day Return", f"{p_ret*100:.2f}%")
+    c2.metric("Risk Probability", f"{p_risk:.2%}")
+    c3.markdown(f"<h3 style='color:{col}'>{category}</h3>", unsafe_allow_html=True)
+
 
 # =====================================================================================
-# PAGE 2 — Visual Analytics
+# 3. Scenario Stress Testing
 # =====================================================================================
 
-elif page == "Visual Analytics":
+elif page == "Scenario Stress Testing":
+    st.title("Market Condition Stress Testing")
 
-    st.header("Visual Analytics")
+    st.write("Evaluate how changes in market volatility, interest rates, or deal characteristics influence risk.")
 
-    col1, col2 = st.columns(2)
+    ipodf = pd.DataFrame([preds[feature_cols].mean()])  # baseline IPO example
 
-    # SHAP Feature Importance Bar
-    with col1:
-        st.subheader("Top Predictive Features (SHAP Importance)")
-        fig, ax = plt.subplots(figsize=(6, 8))
-        top10 = importance_df.sort_values("Importance", ascending=False).head(10)
+    vix = st.slider("CBOE VIX Level", 5.0, 60.0, 20.0)
+    ipodf["vix_level"] = vix
 
-        ax.barh(top10["Feature"], top10["Importance"])
-        ax.set_xlabel("Mean |SHAP Value|")
-        ax.invert_yaxis()
-        st.pyplot(fig)
+    shares = st.slider("Shares Offered", 0, 300_000_000, int(ipodf["shares_offered"].iloc[0]))
+    ipodf["shares_offered"] = shares
 
-    # Distribution of predicted returns
-    with col2:
-        st.subheader("Distribution of Predicted First-Day Returns")
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.hist(test_predictions["predicted_return"] * 100, bins=25)
-        ax.set_xlabel("Predicted Return (%)")
-        st.pyplot(fig)
+    proceeds = st.slider("Gross Proceeds ($)", 1e6, 500e6, float(ipodf["gross_proceeds"].iloc[0]))
+    ipodf["gross_proceeds"] = proceeds
 
-    st.subheader("VIX vs Predicted IPO Risk")
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.scatter(test_predictions["vix_level"], test_predictions["predicted_risk_prob"], alpha=0.5)
-    ax.set_xlabel("VIX Level")
-    ax.set_ylabel("Predicted Risk Probability")
+    p_risk, p_ret = predict(ipodf)
+    category, col = risk_category(p_risk)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Predicted First-Day Return", f"{p_ret*100:.2f}%")
+    c2.metric("Risk Probability", f"{p_risk:.2%}")
+    c3.markdown(f"<h3 style='color:{col}'>{category}</h3>", unsafe_allow_html=True)
+
+    st.subheader("Effect of VIX on Model Predictions")
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.scatter(preds["vix_level"], preds["predicted_risk_prob"], alpha=0.6)
+    ax.axvline(vix, color="red")
+    ax.set_xlabel("VIX")
+    ax.set_ylabel("Risk Probability")
     st.pyplot(fig)
 
 
+# =====================================================================================
+# 4. Feature Importance
+# =====================================================================================
+
+elif page == "Feature Importance":
+    st.title("Feature Importance and Explainability")
+
+    st.subheader("Top Predictive Features (SHAP Importance)")
+    fig, ax = plt.subplots(figsize=(6, 8))
+    top10 = importance.sort_values("Importance", ascending=False).head(10)
+    ax.barh(top10["Feature"], top10["Importance"], color="#0055A4")
+    ax.invert_yaxis()
+    st.pyplot(fig)
+
+    st.subheader("SHAP Summary Plot")
+    explainer = shap.TreeExplainer(clf)
+    sample = scaler.transform(preds[feature_cols].head(200))
+    shap_values = explainer.shap_values(sample)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    shap.summary_plot(shap_values, pd.DataFrame(sample, columns=feature_cols), show=False)
+    st.pyplot(fig)
+
 
 # =====================================================================================
-# PAGE 3 — Model Performance
+# 5. Model Performance
 # =====================================================================================
 
 elif page == "Model Performance":
+    st.title("Model Performance Overview")
 
-    st.header("Model Performance Overview")
+    st.subheader("Classification Results")
+    st.dataframe(clf_metrics)
 
-    st.subheader("Classification Models — High-Risk IPO Prediction")
-    st.dataframe(clf_results)
+    st.subheader("Regression Results")
+    st.dataframe(reg_metrics)
 
-    st.subheader("Regression Models — First-Day Return Prediction")
-    st.dataframe(reg_results)
-
-    st.subheader("Best Models")
-    st.write(f"**Best Classifier:** {metadata['best_classifier_name']}  (AUC = {metadata['best_classifier_auc']:.3f})")
-    st.write(f"**Best Regressor:** {metadata['best_regressor_name']}  (RMSE = {metadata['best_regressor_rmse']:.3f})")
-
+    st.write("Best Classifier:", metadata["best_classifier_name"])
+    st.write("Best Regressor:", metadata["best_regressor_name"])
 
 
 # =====================================================================================
-# PAGE 4 — Investment Strategies
+# 6. Strategy Evaluation
 # =====================================================================================
 
-elif page == "Investment Strategies":
+elif page == "Strategy Evaluation":
+    st.title("Investment Strategy Evaluation")
 
-    st.header("Economic Evaluation of IPO Investment Strategies")
+    st.write("Comparison of hypothetical investment strategies using model output.")
 
-    st.write(
-        "The following strategy outputs replicate those computed in the research notebook, "
-        "based on predicted returns and predicted risk classification."
-    )
+    st.subheader("Summary Table")
+    st.dataframe(strategy)
 
-    st.subheader("Strategy Summary Table")
-    st.dataframe(strategy_summary)
-
-    # Bar chart of mean returns
-    st.subheader("Mean Return by Strategy")
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.bar(strategy_summary["Strategy"], strategy_summary["Mean Return (%)"])
-    ax.set_ylabel("Mean Return (%)")
+    st.subheader("Mean Returns")
+    fig, ax = plt.subplots(figsize=(8, 4))
+    sns.barplot(strategy, x="Strategy", y="Mean Return (%)", ax=ax, palette="Blues_r")
     ax.tick_params(axis="x", rotation=45)
     st.pyplot(fig)
 
-    # Risk-return profile
-    st.subheader("Risk–Return Profile")
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(
-        strategy_summary["Std Dev (%)"],
-        strategy_summary["Mean Return (%)"],
-        s=150
-    )
-    for i, label in enumerate(strategy_summary["Strategy"]):
-        ax.annotate(label, (strategy_summary["Std Dev (%)"][i], strategy_summary["Mean Return (%)"][i]))
-
-    ax.set_xlabel("Standard Deviation (%)")
+    st.subheader("Risk–Return Scatter")
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.scatter(strategy["Std Dev (%)"], strategy["Mean Return (%)"], s=120, c="#0066CC")
+    for i, row in strategy.iterrows():
+        ax.text(row["Std Dev (%)"] + 0.1, row["Mean Return (%)"], row["Strategy"])
+    ax.set_xlabel("Std Dev (%)")
     ax.set_ylabel("Mean Return (%)")
     st.pyplot(fig)
